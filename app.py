@@ -1,7 +1,6 @@
 # app.py (Strong AI Baseline Version)
 
 import os
-import platform
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for, flash
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -103,7 +102,7 @@ def handle_move():
     move_object = chess.Move.from_uci(player_move_uci)
 
     if move_object in board.legal_moves:
-        # 1. Log the player's move (to confirm this part of the pipeline works)
+        # 1. Log the player's move
         ranked_moves = get_ranked_moves(board)
         move_rank = ranked_moves.index(move_object.uci()) + 1 if move_object.uci() in ranked_moves else len(ranked_moves)
         piece_moved = board.piece_at(move_object.from_square).symbol()
