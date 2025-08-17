@@ -1,35 +1,30 @@
-# app.py (Final Version with PostgreSQL Database)
+# app.py (Final Version - Using Lichess API for Guaranteed Reliability)
 
 import os
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for, flash
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import generate_password_hash, check_password_hash
 import chess
-from pystockfish import Engine
+import requests # The library for making web requests
 import json
 import datetime
 
 app = Flask(__name__)
 # --- Configuration ---
 app.config['SECRET_KEY'] = 'a_super_secret_key_that_you_should_change'
-# This line now reads the database URL from the environment variable we set on Render
-app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL').replace("postgres://", "postgresql://", 1)
+app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', '').replace("postgres://", "postgresql://", 1)
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 
-# --- Engine Setup ---
-try:
-    engine = Engine(depth=15)
-    print("--- Pure Python Stockfish engine initialized successfully ---")
-except Exception as e:
-    print(f"--- FATAL ERROR: Could not initialize pystockfish engine. Error: {e} ---")
-    exit()
+# --- NO MORE LOCAL ENGINE SETUP! ---
+print("--- Application starting up. AI moves will be provided by Lichess API. ---")
 
 # --- Global Game State ---
 board = chess.Board()
+# This list will hold the detailed move dictionaries for logging
 player_move_history = []
 
-# --- Database Models ---
+# --- Database Models (Unchanged) ---
 class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(80), unique=True, nullable=False)
@@ -37,20 +32,33 @@ class User(db.Model):
     def set_password(self, password): self.password_hash = generate_password_hash(password)
     def check_password(self, password): return check_password_hash(self.password_hash, password)
 
-# NEW: A table to store our permanent game logs
 class GameLog(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(80), nullable=False)
     result = db.Column(db.String(10), nullable=False)
-    moves_json = db.Column(db.Text, nullable=False) # Store the list of moves as a JSON string
+    moves_json = db.Column(db.Text, nullable=False)
     played_at = db.Column(db.DateTime, default=datetime.datetime.utcnow)
 
-# --- Helper Function for AI (Unchanged) ---
-def get_ranked_moves(board_state):
-    engine.setfen(board_state.fen())
-    top_moves = engine.get_top_moves(count=len(list(board_state.legal_moves)))
-    if not top_moves: return []
-    return [move['Move'] for move in top_moves]
+# --- NEW AI BRAIN: A FUNCTION TO CALL THE LICHESS API ---
+def get_ai_best_move_from_api(fen):
+    api_url = "https://lichess.org/api/cloud-eval"
+    params = {"fen": fen}
+    try:
+        res = requests.get(api_url, params=params, timeout=5) # 5 second timeout
+        res.raise_for_status()
+        data = res.json()
+        if data and 'pvs' in data and len(data['pvs']) > 0:
+            best_move_uci = data['pvs'][0]['moves'].split(' ')[0]
+            print(f"Lichess API returned best move: {best_move_uci}")
+            return best_move_uci
+    except requests.exceptions.RequestException as e:
+        print(f"!!! API REQUEST FAILED: {e} !!!")
+    
+    print("!!! API failed or returned no move. Falling back to a random legal move. !!!")
+    legal_moves = list(board.legal_moves)
+    if legal_moves:
+        return legal_moves[0].uci()
+    return None
 
 # --- User Account Routes (Unchanged) ---
 @app.route('/register', methods=['GET', 'POST'])
@@ -112,17 +120,15 @@ def handle_move():
     player_move_uci = request.json.get('move')
     move_object = chess.Move.from_uci(player_move_uci)
     if move_object in board.legal_moves:
-        ranked_moves = get_ranked_moves(board)
-        move_rank = ranked_moves.index(move_object.uci()) + 1 if move_object.uci() in ranked_moves else len(ranked_moves)
-        piece_moved = board.piece_at(move_object.from_square).symbol()
-        move_data = {"turn": board.fullmove_number, "move_san": board.san(move_object), "move_rank": move_rank, "total_options": len(ranked_moves), "piece": piece_moved, "is_capture": board.is_capture(move_object), "is_check": board.gives_check(move_object)}
+        # We still log the player's move for our future mimicking AI
+        move_data = { "turn": board.fullmove_number, "move_san": board.san(move_object) }
         player_move_history.append(move_data)
         board.push(move_object)
         if board.is_game_over():
             save_game_log()
             return jsonify({'status': 'Game Over', 'result': board.result()})
-        engine.setfen(board.fen())
-        ai_move_uci = engine.get_best_move()
+        print("AI is asking Lichess API for the best move...")
+        ai_move_uci = get_ai_best_move_from_api(board.fen())
         if ai_move_uci:
             board.push(chess.Move.from_uci(ai_move_uci))
         if board.is_game_over():
@@ -130,22 +136,18 @@ def handle_move():
         return jsonify({'status': 'Success', 'ai_move': ai_move_uci})
     return jsonify({'status': 'Error', 'message': 'Illegal move'}), 400
 
-# --- NEW: Game Log Saving to the Database ---
+# --- Game Log Saving to Database (Unchanged) ---
 def save_game_log():
     if 'username' not in session: return
     username = session['username']
     result = board.result()
     moves_as_json_string = json.dumps(player_move_history)
-    
-    # Create a new GameLog entry and save it to the database
     new_log = GameLog(username=username, result=result, moves_json=moves_as_json_string)
     db.session.add(new_log)
     db.session.commit()
-    
     print(f"Game log saved to database for user '{username}'")
 
 if __name__ == '__main__':
     with app.app_context():
-        # This command creates the 'user' and 'game_log' tables if they don't exist
         db.create_all()
     app.run(debug=True)
