@@ -1,7 +1,7 @@
-# app.py (Final Version with Debug Print)
+# app.py (Final, Robust Path Checking)
 
 import os
-import platform # Import the platform module
+import platform
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for, flash
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -10,32 +10,41 @@ from stockfish import Stockfish
 import json
 
 app = Flask(__name__)
+# ... (config is the same)
 app.config['SECRET_KEY'] = 'a_super_secret_key_that_you_should_change'
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///users.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 
-# --- Chess Engine and Game State Setup ---
+# --- THIS IS THE FINAL, CORRECTED ENGINE SETUP ---
 try:
-    # --- THIS IS THE CRITICAL LOGIC ---
-    print(f"--- DETECTING OPERATING SYSTEM ---")
-    print(f"--- Running on OS: {platform.system()} ---")
-    
-    stockfish_path = "/usr/games/stockfish"  # Path for Linux
-    if platform.system() == "Windows":
-        stockfish_path = "stockfish.exe"     # Path for Windows
+    stockfish_path = None
+    print(f"--- DETECTING OPERATING SYSTEM: {platform.system()} ---")
 
+    if platform.system() == "Windows":
+        stockfish_path = "stockfish.exe"
+    else: # We are on Linux or another OS
+        # Check common Linux paths for the Stockfish executable
+        if os.path.exists("/usr/bin/stockfish"):
+            stockfish_path = "/usr/bin/stockfish"
+        elif os.path.exists("/usr/games/stockfish"):
+            stockfish_path = "/usr/games/stockfish"
+        else:
+            # If we can't find it, the app can't run.
+            raise FileNotFoundError("Stockfish executable not found in common Linux paths.")
+
+    print(f"--- Attempting to initialize Stockfish from: {stockfish_path} ---")
     stockfish = Stockfish(path=stockfish_path)
     stockfish.set_skill_level(5)
-    print(f"--- Stockfish engine initialized from path: {stockfish_path} ---")
-    
+    print(f"--- Stockfish engine initialized successfully ---")
+
 except Exception as e:
     print(f"--- FATAL ERROR: Could not initialize Stockfish. Error: {e} ---")
     exit()
-# --- END OF CRITICAL LOGIC ---
+# --- END OF FINAL ENGINE SETUP ---
 
 
-# ... [The rest of your code is exactly the same and correct] ...
+# ... (The rest of your code - User model, all functions, all routes - is exactly the same and correct) ...
 # ...
 board = chess.Board()
 player_move_history = []
@@ -165,17 +174,20 @@ def handle_move():
 def save_game_log():
     if 'username' not in session: return
     username = session['username']
+    # You might want to save logs in a specific folder
+    log_dir = "game_logs"
+    os.makedirs(log_dir, exist_ok=True)
     match_number = 1
-    while os.path.exists(f"{username}_match_{match_number}.json"):
+    while os.path.exists(os.path.join(log_dir, f"{username}_match_{match_number}.json")):
         match_number += 1
-    log_filename = f"{username}_match_{match_number}.json"
+    log_filename = os.path.join(log_dir, f"{username}_match_{match_number}.json")
     with open(log_filename, "w") as f:
         json.dump(player_move_history, f, indent=2)
     print(f"Game history saved for {username} as '{log_filename}'")
 
 def load_mimic_profile():
     global mimic_profile
-    profile_filename = "friend_match_1.json"
+    profile_filename = "friend_match_1.json" # Assumes it's in the root
     if os.path.exists(profile_filename):
         with open(profile_filename, "r") as f:
             history = json.load(f)
@@ -187,7 +199,7 @@ def load_mimic_profile():
         mimic_profile = analyze_player_style([])
 
 if __name__ == '__main__':
-    with app.app_contex():
+    with app.app_context():
         db.create_all()
     load_mimic_profile()
     app.run(debug=True)
