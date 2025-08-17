@@ -1,4 +1,4 @@
-# app.py (Final, Robust Path Checking)
+# app.py (Final Version - Using Local Executables)
 
 import os
 import platform
@@ -16,24 +16,17 @@ app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///users.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 
-# --- THIS IS THE FINAL, CORRECTED ENGINE SETUP ---
+# --- THIS IS THE FINAL, SIMPLIFIED ENGINE SETUP ---
 try:
     stockfish_path = None
     print(f"--- DETECTING OPERATING SYSTEM: {platform.system()} ---")
 
     if platform.system() == "Windows":
-        stockfish_path = "stockfish.exe"
-    else: # We are on Linux or another OS
-        # Check common Linux paths for the Stockfish executable
-        if os.path.exists("/usr/bin/stockfish"):
-            stockfish_path = "/usr/bin/stockfish"
-        elif os.path.exists("/usr/games/stockfish"):
-            stockfish_path = "/usr/games/stockfish"
-        else:
-            # If we can't find it, the app can't run.
-            raise FileNotFoundError("Stockfish executable not found in common Linux paths.")
+        stockfish_path = "./stockfish.exe" # Use local exe on Windows
+    else: # We are on Linux
+        stockfish_path = "./stockfish-linux"  # Use local linux executable
 
-    print(f"--- Attempting to initialize Stockfish from: {stockfish_path} ---")
+    print(f"--- Attempting to initialize Stockfish from local path: {stockfish_path} ---")
     stockfish = Stockfish(path=stockfish_path)
     stockfish.set_skill_level(5)
     print(f"--- Stockfish engine initialized successfully ---")
@@ -44,7 +37,7 @@ except Exception as e:
 # --- END OF FINAL ENGINE SETUP ---
 
 
-# ... (The rest of your code - User model, all functions, all routes - is exactly the same and correct) ...
+# ... (The rest of your code is exactly the same and correct) ...
 # ...
 board = chess.Board()
 player_move_history = []
@@ -174,7 +167,6 @@ def handle_move():
 def save_game_log():
     if 'username' not in session: return
     username = session['username']
-    # You might want to save logs in a specific folder
     log_dir = "game_logs"
     os.makedirs(log_dir, exist_ok=True)
     match_number = 1
@@ -187,11 +179,11 @@ def save_game_log():
 
 def load_mimic_profile():
     global mimic_profile
-    profile_filename = "friend_match_1.json" # Assumes it's in the root
+    profile_filename = "friend_match_1.json"
     if os.path.exists(profile_filename):
         with open(profile_filename, "r") as f:
             history = json.load(f)
-            mimic_profile = analyze_player_style(history)
+            mimic_profile = analyze__style(history)
             print(f"Successfully loaded and analyzed '{profile_filename}'.")
             print(json.dumps(mimic_profile, indent=2))
     else:
