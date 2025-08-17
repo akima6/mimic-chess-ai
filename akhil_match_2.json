@@ -1,0 +1,191 @@
+[
+  {
+    "turn": 1,
+    "move_san": "Nh3",
+    "move_rank": 17,
+    "total_options": 20,
+    "piece": "N",
+    "is_capture": false,
+    "is_check": false
+  },
+  {
+    "turn": 2,
+    "move_san": "Na3",
+    "move_rank": 15,
+    "total_options": 20,
+    "piece": "N",
+    "is_capture": false,
+    "is_check": false
+  },
+  {
+    "turn": 3,
+    "move_san": "d4",
+    "move_rank": 3,
+    "total_options": 18,
+    "piece": "P",
+    "is_capture": false,
+    "is_check": false
+  },
+  {
+    "turn": 4,
+    "move_san": "Qd2",
+    "move_rank": 3,
+    "total_options": 3,
+    "piece": "Q",
+    "is_capture": false,
+    "is_check": false
+  },
+  {
+    "turn": 5,
+    "move_san": "Kxd2",
+    "move_rank": 2,
+    "total_options": 3,
+    "piece": "K",
+    "is_capture": true,
+    "is_check": false
+  },
+  {
+    "turn": 6,
+    "move_san": "e3",
+    "move_rank": 3,
+    "total_options": 20,
+    "piece": "P",
+    "is_capture": false,
+    "is_check": false
+  },
+  {
+    "turn": 7,
+    "move_san": "Kxe3",
+    "move_rank": 4,
+    "total_options": 7,
+    "piece": "K",
+    "is_capture": true,
+    "is_check": false
+  },
+  {
+    "turn": 8,
+    "move_san": "Ke4",
+    "move_rank": 24,
+    "total_options": 28,
+    "piece": "K",
+    "is_capture": false,
+    "is_check": false
+  },
+  {
+    "turn": 9,
+    "move_san": "Kd5",
+    "move_rank": 24,
+    "total_options": 29,
+    "piece": "K",
+    "is_capture": false,
+    "is_check": false
+  },
+  {
+    "turn": 10,
+    "move_san": "Kd4",
+    "move_rank": 2,
+    "total_options": 2,
+    "piece": "K",
+    "is_capture": false,
+    "is_check": false
+  },
+  {
+    "turn": 11,
+    "move_san": "Kd3",
+    "move_rank": 2,
+    "total_options": 4,
+    "piece": "K",
+    "is_capture": false,
+    "is_check": false
+  },
+  {
+    "turn": 12,
+    "move_san": "Kxc4",
+    "move_rank": 4,
+    "total_options": 6,
+    "piece": "K",
+    "is_capture": true,
+    "is_check": false
+  },
+  {
+    "turn": 13,
+    "move_san": "Kd4",
+    "move_rank": 2,
+    "total_options": 5,
+    "piece": "K",
+    "is_capture": false,
+    "is_check": false
+  },
+  {
+    "turn": 14,
+    "move_san": "Ke3",
+    "move_rank": 2,
+    "total_options": 22,
+    "piece": "K",
+    "is_capture": false,
+    "is_check": false
+  },
+  {
+    "turn": 15,
+    "move_san": "Kf3",
+    "move_rank": 2,
+    "total_options": 3,
+    "piece": "K",
+    "is_capture": false,
+    "is_check": false
+  },
+  {
+    "turn": 16,
+    "move_san": "Ke4",
+    "move_rank": 1,
+    "total_options": 1,
+    "piece": "K",
+    "is_capture": false,
+    "is_check": false
+  },
+  {
+    "turn": 17,
+    "move_san": "Kd3",
+    "move_rank": 1,
+    "total_options": 1,
+    "piece": "K",
+    "is_capture": false,
+    "is_check": false
+  },
+  {
+    "turn": 18,
+    "move_san": "Kc3",
+    "move_rank": 1,
+    "total_options": 2,
+    "piece": "K",
+    "is_capture": false,
+    "is_check": false
+  },
+  {
+    "turn": 19,
+    "move_san": "Kb4",
+    "move_rank": 1,
+    "total_options": 2,
+    "piece": "K",
+    "is_capture": false,
+    "is_check": false
+  },
+  {
+    "turn": 20,
+    "move_san": "Ka3",
+    "move_rank": 1,
+    "total_options": 3,
+    "piece": "K",
+    "is_capture": false,
+    "is_check": false
+  },
+  {
+    "turn": 21,
+    "move_san": "Kb3",
+    "move_rank": 2,
+    "total_options": 3,
+    "piece": "K",
+    "is_capture": false,
+    "is_check": false
+  }
+]
