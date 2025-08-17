@@ -1,4 +1,4 @@
-# app.py (Final Version - Using Local Executables)
+# app.py (Final, Robust Version with Safety Net)
 
 import os
 import platform
@@ -16,29 +16,24 @@ app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///users.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 
-# --- THIS IS THE FINAL, SIMPLIFIED ENGINE SETUP ---
+# --- Engine Setup (This part is now correct) ---
 try:
     stockfish_path = None
-    print(f"--- DETECTING OPERATING SYSTEM: {platform.system()} ---")
-
     if platform.system() == "Windows":
-        stockfish_path = "./stockfish.exe" # Use local exe on Windows
-    else: # We are on Linux
-        stockfish_path = "./stockfish-linux"  # Use local linux executable
-
-    print(f"--- Attempting to initialize Stockfish from local path: {stockfish_path} ---")
+        stockfish_path = "./stockfish.exe"
+    else:
+        if os.path.exists("./stockfish-linux"):
+            stockfish_path = "./stockfish-linux"
+        else:
+            raise FileNotFoundError("Packaged Stockfish executable not found.")
     stockfish = Stockfish(path=stockfish_path)
     stockfish.set_skill_level(5)
-    print(f"--- Stockfish engine initialized successfully ---")
-
+    print(f"--- Stockfish engine initialized successfully from: {stockfish_path} ---")
 except Exception as e:
     print(f"--- FATAL ERROR: Could not initialize Stockfish. Error: {e} ---")
     exit()
-# --- END OF FINAL ENGINE SETUP ---
 
-
-# ... (The rest of your code is exactly the same and correct) ...
-# ...
+# ... (The rest of your code is the same until handle_move) ...
 board = chess.Board()
 player_move_history = []
 mimic_profile = None
@@ -79,6 +74,7 @@ def choose_mimic_move(board_state, profile):
     if not all_moves: return None
     safe_move_count = max(1, int(len(all_moves) * 0.75))
     candidate_moves = all_moves[:safe_move_count]
+    if not candidate_moves: return all_moves[0] # Fallback if list is somehow empty
     move_scores = {}
     for i, move_uci in enumerate(candidate_moves):
         score = 0
@@ -90,6 +86,7 @@ def choose_mimic_move(board_state, profile):
             score += profile['piece_preference'][moved_piece] * 0.1
         score -= i * 0.01
         move_scores[move_uci] = score
+    if not move_scores: return all_moves[0] # Another fallback
     return max(move_scores, key=move_scores.get)
 
 @app.route('/register', methods=['GET', 'POST'])
@@ -146,21 +143,42 @@ def handle_move():
     if 'user_id' not in session: return jsonify({'status': 'Error', 'message': 'Not authenticated'}), 401
     player_move_uci = request.json.get('move')
     move_object = chess.Move.from_uci(player_move_uci)
+
     if move_object in board.legal_moves:
         ranked_moves = get_ranked_moves(board)
         move_rank = ranked_moves.index(move_object.uci()) + 1 if move_object.uci() in ranked_moves else len(ranked_moves)
         piece_moved = board.piece_at(move_object.from_square).symbol()
         move_data = {"turn": board.fullmove_number, "move_san": board.san(move_object), "move_rank": move_rank, "total_options": len(ranked_moves), "piece": piece_moved, "is_capture": board.is_capture(move_object), "is_check": board.gives_check(move_object)}
         player_move_history.append(move_data)
+        
         board.push(move_object)
+
         if board.is_game_over():
             save_game_log()
             return jsonify({'status': 'Game Over', 'result': board.result()})
-        ai_move_uci = choose_mimic_move(board, mimic_profile)
+
+        # --- THIS IS THE NEW, ROBUST AI LOGIC ---
+        ai_move_uci = None
+        try:
+            print("AI is thinking with mimic logic...")
+            ai_move_uci = choose_mimic_move(board, mimic_profile)
+        except Exception as e:
+            print(f"!!! MIMIC AI FAILED with error: {e}. Falling back to best move. !!!")
+        
+        # If the mimic AI failed or didn't find a move, play the best move as a fallback
+        if not ai_move_uci:
+            ranked_moves = get_ranked_moves(board)
+            if ranked_moves:
+                ai_move_uci = ranked_moves[0]
+
+        # --- END OF NEW LOGIC ---
+
         if ai_move_uci:
             board.push(chess.Move.from_uci(ai_move_uci))
+        
         if board.is_game_over():
             save_game_log()
+
         return jsonify({'status': 'Success', 'ai_move': ai_move_uci})
     return jsonify({'status': 'Error', 'message': 'Illegal move'}), 400
 
@@ -168,7 +186,8 @@ def save_game_log():
     if 'username' not in session: return
     username = session['username']
     log_dir = "game_logs"
-    os.makedirs(log_dir, exist_ok=True)
+    if not os.path.exists(log_dir):
+        os.makedirs(log_dir)
     match_number = 1
     while os.path.exists(os.path.join(log_dir, f"{username}_match_{match_number}.json")):
         match_number += 1
@@ -179,11 +198,12 @@ def save_game_log():
 
 def load_mimic_profile():
     global mimic_profile
+    # IMPORTANT: Change this to the log you want to mimic
     profile_filename = "friend_match_1.json"
     if os.path.exists(profile_filename):
         with open(profile_filename, "r") as f:
             history = json.load(f)
-            mimic_profile = analyze__style(history)
+            mimic_profile = analyze_player_style(history)
             print(f"Successfully loaded and analyzed '{profile_filename}'.")
             print(json.dumps(mimic_profile, indent=2))
     else:
