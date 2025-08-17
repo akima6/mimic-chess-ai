@@ -1,12 +1,13 @@
-# app.py (Strong AI Baseline Version)
+# app.py (Final Version - Using Lichess API)
 
 import os
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for, flash
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import generate_password_hash, check_password_hash
 import chess
-from pystockfish import Engine # Using the pure Python engine
+import requests # The library for making web requests
 import json
+import time
 
 app = Flask(__name__)
 # --- Configuration ---
@@ -15,18 +16,13 @@ app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///users.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 
-# --- Engine Setup ---
-try:
-    # Depth is how many moves ahead it thinks. 12 is reasonably strong.
-    engine = Engine(depth=12)
-    print("--- Pure Python Stockfish engine initialized successfully ---")
-except Exception as e:
-    print(f"--- FATAL ERROR: Could not initialize pystockfish engine. Error: {e} ---")
-    exit()
+# --- NO MORE LOCAL ENGINE SETUP! ---
+print("--- Application starting up. AI moves will be provided by Lichess API. ---")
 
 # --- Global Game State ---
 board = chess.Board()
-player_move_history = []
+# IMPORTANT: The Lichess API needs the full move history to analyze the position
+game_move_history_uci = []
 
 # --- Database Model (Unchanged) ---
 class User(db.Model):
@@ -36,16 +32,41 @@ class User(db.Model):
     def set_password(self, password): self.password_hash = generate_password_hash(password)
     def check_password(self, password): return check_password_hash(self.password_hash, password)
 
-# --- Helper Function for Logging (Unchanged) ---
-def get_ranked_moves(board_state):
-    engine.setfen(board_state.fen())
-    top_moves = engine.get_top_moves(count=len(list(board_state.legal_moves)))
-    if not top_moves: return []
-    return [move['Move'] for move in top_moves]
+# --- NEW AI BRAIN: A FUNCTION TO CALL THE LICHESS API ---
+def get_ai_best_move_from_api(fen, moves_list):
+    """
+    Calls the Lichess API to get the best move for the current position.
+    """
+    api_url = "https://lichess.org/api/cloud-eval"
+    # The API can take the position as a FEN string
+    params = {"fen": fen}
+    
+    try:
+        # Make the web request to the API
+        res = requests.get(api_url, params=params)
+        res.raise_for_status() # Raise an exception for bad status codes (4xx or 5xx)
+        data = res.json()
+        
+        # The best move is in the 'pvs' (principal variations) list
+        if data and 'pvs' in data and len(data['pvs']) > 0:
+            best_move_uci = data['pvs'][0]['moves'].split(' ')[0]
+            print(f"Lichess API returned best move: {best_move_uci}")
+            return best_move_uci
+    except requests.exceptions.RequestException as e:
+        print(f"!!! API REQUEST FAILED: {e} !!!")
+    
+    # Fallback: If the API fails, just pick a random legal move
+    print("!!! API failed. Falling back to a random legal move. !!!")
+    legal_moves = list(board.legal_moves)
+    if legal_moves:
+        return legal_moves[0].uci()
+    return None
+
 
 # --- User Account Routes (Unchanged) ---
 @app.route('/register', methods=['GET', 'POST'])
 def register():
+    # ... (code is unchanged)
     if request.method == 'POST':
         username = request.form.get('username')
         password = request.form.get('password')
@@ -63,8 +84,10 @@ def register():
         return redirect(url_for('login'))
     return render_template('register.html')
 
+
 @app.route('/login', methods=['GET', 'POST'])
 def login():
+    # ... (code is unchanged)
     if request.method == 'POST':
         username = request.form.get('username')
         password = request.form.get('password')
@@ -80,6 +103,7 @@ def login():
 
 @app.route('/logout')
 def logout():
+    # ... (code is unchanged)
     session.pop('user_id', None)
     session.pop('username', None)
     flash('You have been logged out.')
@@ -90,8 +114,9 @@ def logout():
 def home():
     if 'user_id' not in session:
         return redirect(url_for('login'))
+    # Reset game state for a new game
     board.reset()
-    player_move_history.clear()
+    game_move_history_uci.clear()
     return render_template('index.html')
 
 @app.route('/move', methods=['POST'])
@@ -102,32 +127,24 @@ def handle_move():
     move_object = chess.Move.from_uci(player_move_uci)
 
     if move_object in board.legal_moves:
-        # 1. Log the player's move
-        ranked_moves = get_ranked_moves(board)
-        move_rank = ranked_moves.index(move_object.uci()) + 1 if move_object.uci() in ranked_moves else len(ranked_moves)
-        piece_moved = board.piece_at(move_object.from_square).symbol()
-        move_data = {"turn": board.fullmove_number, "move_san": board.san(move_object), "move_rank": move_rank, "total_options": len(ranked_moves), "piece": piece_moved, "is_capture": board.is_capture(move_object), "is_check": board.gives_check(move_object)}
-        player_move_history.append(move_data)
-        
-        # 2. Apply the player's move
         board.push(move_object)
+        game_move_history_uci.append(move_object.uci())
 
         if board.is_game_over():
             save_game_log()
             return jsonify({'status': 'Game Over', 'result': board.result()})
 
-        # 3. AI's Turn: Get the single best move
-        print("AI is calculating the best move...")
-        engine.setfen(board.fen())
-        ai_move_uci = engine.get_best_move()
+        # 3. AI's Turn: Call the Lichess API
+        print("AI is asking Lichess API for the best move...")
+        ai_move_uci = get_ai_best_move_from_api(board.fen(), game_move_history_uci)
         
         if ai_move_uci:
             board.push(chess.Move.from_uci(ai_move_uci))
+            game_move_history_uci.append(ai_move_uci)
         
         if board.is_game_over():
             save_game_log()
 
-        # 4. Return the AI's move to the frontend
         return jsonify({'status': 'Success', 'ai_move': ai_move_uci})
     
     return jsonify({'status': 'Error', 'message': 'Illegal move'}), 400
@@ -143,8 +160,9 @@ def save_game_log():
     while os.path.exists(os.path.join(log_dir, f"{username}_match_{match_number}.json")):
         match_number += 1
     log_filename = os.path.join(log_dir, f"{username}_match_{match_number}.json")
+    # We will just save the UCI moves for now
     with open(log_filename, "w") as f:
-        json.dump(player_move_history, f, indent=2)
+        json.dump({"moves_uci": game_move_history_uci}, f, indent=2)
     print(f"Game history saved for {username} as '{log_filename}'")
 
 if __name__ == '__main__':
