@@ -2,5 +2,5 @@ Flask
 Flask-SQLAlchemy
 gunicorn
 python-chess
-pystockfish
+requests
 werkzeug
