@@ -1,33 +1,24 @@
-# app.py
+# app.py (Final Version - Hybrid AI with PostgreSQL Database)
 
 import os
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for, flash
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import generate_password_hash, check_password_hash
 import chess
-from stockfish import Stockfish
+import requests
 import json
 import datetime
+import random
 
 app = Flask(__name__)
-
 # --- Configuration ---
-app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'a_super_secret_key')
-app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', '').replace(
-    "postgres://", "postgresql://", 1)
+app.config['SECRET_KEY'] = 'a_super_secret_key_that_you_should_change'
+# This line reads the database URL from the environment variable we set on Render
+app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', '').replace("postgres://", "postgresql://", 1)
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 
-# --- Engine Setup ---
-STOCKFISH_PATH = os.path.join(os.path.dirname(__file__), "engine/stockfish")
-try:
-    engine = Stockfish(path=STOCKFISH_PATH, depth=15)
-    if not engine.is_stockfish_running():
-        raise Exception("Stockfish engine not running")
-    print("--- Stockfish engine initialized successfully ---")
-except Exception as e:
-    print(f"--- FATAL ERROR: Could not initialize Stockfish engine. Error: {e} ---")
-    exit()
+print("--- Application starting up. AI moves will be provided by a Hybrid AI. ---")
 
 # --- Global Game State ---
 board = chess.Board()
@@ -38,12 +29,8 @@ class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(80), unique=True, nullable=False)
     password_hash = db.Column(db.String(256), nullable=False)
-
-    def set_password(self, password):
-        self.password_hash = generate_password_hash(password)
-
-    def check_password(self, password):
-        return check_password_hash(self.password_hash, password)
+    def set_password(self, password): self.password_hash = generate_password_hash(password)
+    def check_password(self, password): return check_password_hash(self.password_hash, password)
 
 class GameLog(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -52,30 +39,72 @@ class GameLog(db.Model):
     moves_json = db.Column(db.Text, nullable=False)
     played_at = db.Column(db.DateTime, default=datetime.datetime.utcnow)
 
-# --- Create tables ---
+# Create the database tables if they don't already exist.
 with app.app_context():
     db.create_all()
-    print("--- Database tables ready ---")
+    print("--- Database tables checked/created successfully. ---")
 
-# --- Helper Function ---
-def get_ranked_moves(board_state):
-    engine.set_fen_position(board_state.fen())
-    moves = engine.get_top_moves(count=len(list(board_state.legal_moves)))
-    if not moves:
-        return []
-    return [move['Move'] for move in moves]
 
-# --- User Routes ---
+# --- NEW: Secondary Brain - Pure Python Evaluation ---
+def evaluate_board(board):
+    piece_values = {chess.PAWN: 1, chess.KNIGHT: 3, chess.BISHOP: 3, chess.ROOK: 5, chess.QUEEN: 9, chess.KING: 0}
+    score = 0
+    for square in chess.SQUARES:
+        piece = board.piece_at(square)
+        if piece:
+            value = piece_values[piece.piece_type]
+            score += value if piece.color == chess.WHITE else -value
+    return score
+
+def get_simple_best_move(board):
+    legal_moves = list(board.legal_moves)
+    if not legal_moves: return None
+    best_move = None
+    best_score = -float('inf') if board.turn == chess.WHITE else float('inf')
+    for move in legal_moves:
+        board.push(move)
+        score = evaluate_board(board)
+        board.pop()
+        if board.turn == chess.WHITE:
+            if score > best_score:
+                best_score = score
+                best_move = move
+        else:
+            if score < best_score:
+                best_score = score
+                best_move = move
+    return best_move.uci() if best_move else random.choice(legal_moves).uci()
+
+# --- NEW: Primary Brain - Lichess API with Smart Fallback ---
+def get_ai_best_move(board):
+    api_url = "https://lichess.org/api/cloud-eval"
+    params = {"fen": board.fen()}
+    try:
+        res = requests.get(api_url, params=params, timeout=5)
+        res.raise_for_status()
+        data = res.json()
+        if data and 'pvs' in data and len(data['pvs']) > 0:
+            best_move_uci = data['pvs'][0]['moves'].split(' ')[0]
+            if chess.Move.from_uci(best_move_uci) in board.legal_moves:
+                print(f"Lichess API returned best move: {best_move_uci}")
+                return best_move_uci
+    except requests.exceptions.RequestException as e:
+        print(f"!!! API REQUEST FAILED: {e}. Using fallback AI. !!!")
+    print("!!! API failed or returned invalid move. Using fallback AI. !!!")
+    return get_simple_best_move(board)
+
+# --- User Account Routes (Unchanged) ---
 @app.route('/register', methods=['GET', 'POST'])
 def register():
+    # ... (code is unchanged)
     if request.method == 'POST':
         username = request.form.get('username')
         password = request.form.get('password')
         if not username or not password:
-            flash('Username and password required.')
+            flash('Username and password are required.')
             return redirect(url_for('register'))
         if User.query.filter_by(username=username).first():
-            flash('Username taken.')
+            flash('Username is already taken.')
             return redirect(url_for('register'))
         new_user = User(username=username)
         new_user.set_password(password)
@@ -87,6 +116,7 @@ def register():
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
+    # ... (code is unchanged)
     if request.method == 'POST':
         username = request.form.get('username')
         password = request.form.get('password')
@@ -102,10 +132,12 @@ def login():
 
 @app.route('/logout')
 def logout():
+    # ... (code is unchanged)
     session.pop('user_id', None)
     session.pop('username', None)
-    flash('Logged out.')
+    flash('You have been logged out.')
     return redirect(url_for('login'))
+
 
 # --- Main Game Routes ---
 @app.route('/')
@@ -118,53 +150,38 @@ def home():
 
 @app.route('/move', methods=['POST'])
 def handle_move():
-    if 'user_id' not in session:
-        return jsonify({'status': 'Error', 'message': 'Not authenticated'}), 401
+    if 'user_id' not in session: return jsonify({'status': 'Error', 'message': 'Not authenticated'}), 401
     player_move_uci = request.json.get('move')
     move_object = chess.Move.from_uci(player_move_uci)
     if move_object in board.legal_moves:
-        ranked_moves = get_ranked_moves(board)
-        move_rank = ranked_moves.index(move_object.uci()) + 1 if move_object.uci() in ranked_moves else len(ranked_moves)
-        piece_moved = board.piece_at(move_object.from_square).symbol()
-        move_data = {
-            "turn": board.fullmove_number,
-            "move_san": board.san(move_object),
-            "move_rank": move_rank,
-            "total_options": len(ranked_moves),
-            "piece": piece_moved,
-            "is_capture": board.is_capture(move_object),
-            "is_check": board.gives_check(move_object)
-        }
+        move_data = { "turn": board.fullmove_number, "move_san": board.san(move_object) }
         player_move_history.append(move_data)
         board.push(move_object)
-
         if board.is_game_over():
             save_game_log()
             return jsonify({'status': 'Game Over', 'result': board.result()})
-
-        engine.set_fen_position(board.fen())
-        ai_move_uci = engine.get_best_move()
+        
+        # --- AI's Turn using the new Hybrid Brain ---
+        ai_move_uci = get_ai_best_move(board)
+        
         if ai_move_uci:
             board.push(chess.Move.from_uci(ai_move_uci))
         if board.is_game_over():
             save_game_log()
-
         return jsonify({'status': 'Success', 'ai_move': ai_move_uci})
-
     return jsonify({'status': 'Error', 'message': 'Illegal move'}), 400
 
-# --- Game Log Function ---
+# --- Game Log Saving to Database (Unchanged) ---
 def save_game_log():
-    if 'username' not in session:
-        return
+    if 'username' not in session: return
     username = session['username']
     result = board.result()
     moves_as_json_string = json.dumps(player_move_history)
     new_log = GameLog(username=username, result=result, moves_json=moves_as_json_string)
     db.session.add(new_log)
     db.session.commit()
-    print(f"Game log saved for '{username}'.")
+    print(f"Game log saved to database for user '{username}'")
 
-# --- Run App ---
+# This is only for running locally
 if __name__ == '__main__':
     app.run(debug=True)
