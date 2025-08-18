@@ -2,6 +2,6 @@ Flask
 Flask-SQLAlchemy
 gunicorn
 python-chess
-requests
+pystockfish
 werkzeug
 psycopg2-binary

@@ -1,11 +1,11 @@
-# app.py (Final, Definitive Version with Correct Password Column Size)
+# app.py (Final Version with pystockfish and PostgreSQL)
 
 import os
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for, flash
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import generate_password_hash, check_password_hash
 import chess
-import requests
+from pystockfish import Engine
 import json
 import datetime
 
@@ -16,21 +16,31 @@ app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', '').repla
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 
-# --- NO MORE LOCAL ENGINE SETUP! ---
-print("--- Application starting up. AI moves will be provided by Lichess API. ---")
+# --- Engine Setup ---
+try:
+    # On Render, the build.sh script will create this file.
+    # On your local Windows PC, you will need a 'pystockfish-engine.exe' file.
+    engine_path = "./pystockfish-engine"
+    if os.name == 'nt': # This checks if the OS is Windows
+        engine_path += ".exe"
+
+    # Depth 15 is very strong.
+    engine = Engine(path=engine_path, depth=15)
+    print("--- pystockfish engine initialized successfully ---")
+except Exception as e:
+    print(f"--- FATAL ERROR: Could not initialize pystockfish engine. Error: {e} ---")
+    # This exit() is important for debugging in Render.
+    exit()
 
 # --- Global Game State ---
 board = chess.Board()
 player_move_history = []
 
-# --- Database Models ---
+# --- Database Models (Unchanged) ---
 class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(80), unique=True, nullable=False)
-    # --- THIS IS THE FIX ---
-    # The password hash is longer than 128 chars, so we make the column wider.
     password_hash = db.Column(db.String(256), nullable=False)
-    # --- END OF FIX ---
     def set_password(self, password): self.password_hash = generate_password_hash(password)
     def check_password(self, password): return check_password_hash(self.password_hash, password)
 
@@ -41,32 +51,17 @@ class GameLog(db.Model):
     moves_json = db.Column(db.Text, nullable=False)
     played_at = db.Column(db.DateTime, default=datetime.datetime.utcnow)
 
-# Create the database tables if they don't already exist.
 with app.app_context():
     db.create_all()
     print("--- Database tables checked/created successfully. ---")
 
 
-# --- AI BRAIN (Unchanged) ---
-def get_ai_best_move_from_api(fen):
-    # ... (code is unchanged)
-    api_url = "https://lichess.org/api/cloud-eval"
-    params = {"fen": fen}
-    try:
-        res = requests.get(api_url, params=params, timeout=5)
-        res.raise_for_status()
-        data = res.json()
-        if data and 'pvs' in data and len(data['pvs']) > 0:
-            best_move_uci = data['pvs'][0]['moves'].split(' ')[0]
-            print(f"Lichess API returned best move: {best_move_uci}")
-            return best_move_uci
-    except requests.exceptions.RequestException as e:
-        print(f"!!! API REQUEST FAILED: {e} !!!")
-    print("!!! API failed. Falling back to a random legal move. !!!")
-    legal_moves = list(board.legal_moves)
-    if legal_moves:
-        return legal_moves[0].uci()
-    return None
+# --- Helper Function for AI ---
+def get_ranked_moves(board_state):
+    engine.setfen(board_state.fen())
+    top_moves = engine.get_top_moves(count=len(list(board_state.legal_moves)))
+    if not top_moves: return []
+    return [move['Move'] for move in top_moves]
 
 # --- User Account Routes (Unchanged) ---
 @app.route('/register', methods=['GET', 'POST'])
@@ -113,7 +108,7 @@ def logout():
     flash('You have been logged out.')
     return redirect(url_for('login'))
 
-# --- Main Game Routes (Unchanged) ---
+# --- Main Game Routes ---
 @app.route('/')
 def home():
     if 'user_id' not in session:
@@ -128,14 +123,18 @@ def handle_move():
     player_move_uci = request.json.get('move')
     move_object = chess.Move.from_uci(player_move_uci)
     if move_object in board.legal_moves:
-        move_data = { "turn": board.fullmove_number, "move_san": board.san(move_object) }
+        ranked_moves = get_ranked_moves(board)
+        move_rank = ranked_moves.index(move_object.uci()) + 1 if move_object.uci() in ranked_moves else len(ranked_moves)
+        piece_moved = board.piece_at(move_object.from_square).symbol()
+        move_data = {"turn": board.fullmove_number, "move_san": board.san(move_object), "move_rank": move_rank, "total_options": len(ranked_moves), "piece": piece_moved, "is_capture": board.is_capture(move_object), "is_check": board.gives_check(move_object)}
         player_move_history.append(move_data)
         board.push(move_object)
         if board.is_game_over():
             save_game_log()
             return jsonify({'status': 'Game Over', 'result': board.result()})
-        print("AI is asking Lichess API for the best move...")
-        ai_move_uci = get_ai_best_move_from_api(board.fen())
+        print("AI is calculating the best move...")
+        engine.setfen(board.fen())
+        ai_move_uci = engine.get_best_move()
         if ai_move_uci:
             board.push(chess.Move.from_uci(ai_move_uci))
         if board.is_game_over():
@@ -154,6 +153,5 @@ def save_game_log():
     db.session.commit()
     print(f"Game log saved to database for user '{username}'")
 
-# This part is only for running the app locally
 if __name__ == '__main__':
     app.run(debug=True)
