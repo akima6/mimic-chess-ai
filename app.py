@@ -1,11 +1,11 @@
-# app.py (Final Version with pystockfish and PostgreSQL)
+# app.py (Final, Corrected Version)
 
 import os
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for, flash
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import generate_password_hash, check_password_hash
 import chess
-from pystockfish import Engine
+from pystockfish import Engine # Using the pure Python engine
 import json
 import datetime
 
@@ -18,18 +18,14 @@ db = SQLAlchemy(app)
 
 # --- Engine Setup ---
 try:
-    # On Render, the build.sh script will create this file.
-    # On your local Windows PC, you will need a 'pystockfish-engine.exe' file.
-    engine_path = "./pystockfish-engine"
-    if os.name == 'nt': # This checks if the OS is Windows
-        engine_path += ".exe"
-
-    # Depth 15 is very strong.
-    engine = Engine(path=engine_path, depth=15)
+    # --- THIS IS THE FIX ---
+    # The pystockfish Engine does NOT take a 'path' argument.
+    # We just create it directly. Depth 15 is very strong.
+    engine = Engine(depth=15)
+    # --- END OF FIX ---
     print("--- pystockfish engine initialized successfully ---")
 except Exception as e:
     print(f"--- FATAL ERROR: Could not initialize pystockfish engine. Error: {e} ---")
-    # This exit() is important for debugging in Render.
     exit()
 
 # --- Global Game State ---
@@ -56,7 +52,7 @@ with app.app_context():
     print("--- Database tables checked/created successfully. ---")
 
 
-# --- Helper Function for AI ---
+# --- Helper Function for AI (Unchanged) ---
 def get_ranked_moves(board_state):
     engine.setfen(board_state.fen())
     top_moves = engine.get_top_moves(count=len(list(board_state.legal_moves)))
@@ -66,7 +62,6 @@ def get_ranked_moves(board_state):
 # --- User Account Routes (Unchanged) ---
 @app.route('/register', methods=['GET', 'POST'])
 def register():
-    # ... (code is unchanged)
     if request.method == 'POST':
         username = request.form.get('username')
         password = request.form.get('password')
@@ -86,7 +81,6 @@ def register():
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
-    # ... (code is unchanged)
     if request.method == 'POST':
         username = request.form.get('username')
         password = request.form.get('password')
@@ -102,13 +96,12 @@ def login():
 
 @app.route('/logout')
 def logout():
-    # ... (code is unchanged)
     session.pop('user_id', None)
     session.pop('username', None)
     flash('You have been logged out.')
     return redirect(url_for('login'))
 
-# --- Main Game Routes ---
+# --- Main Game Routes (Unchanged) ---
 @app.route('/')
 def home():
     if 'user_id' not in session:
