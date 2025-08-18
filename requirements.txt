@@ -1,7 +1,6 @@
 Flask
 Flask-SQLAlchemy
-gunicorn
-python-chess
-pystockfish
-werkzeug
+Werkzeug
+chess
+stockfish
 psycopg2-binary
