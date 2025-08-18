@@ -4,3 +4,4 @@ Werkzeug
 chess
 stockfish
 psycopg2-binary
+gunicorn
