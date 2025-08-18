@@ -1,32 +1,32 @@
-# app.py (Full, Render-Ready Version)
+# app.py
 
 import os
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for, flash
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import generate_password_hash, check_password_hash
 import chess
-from pystockfish import Engine
+from stockfish import Stockfish
 import json
 import datetime
 
 app = Flask(__name__)
 
 # --- Configuration ---
-app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'super-secret-key')
-db_url = os.environ.get('DATABASE_URL', '')
-if db_url.startswith("postgres://"):
-    db_url = db_url.replace("postgres://", "postgresql://", 1)
-app.config['SQLALCHEMY_DATABASE_URI'] = db_url
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'a_super_secret_key')
+app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', '').replace(
+    "postgres://", "postgresql://", 1)
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 
 # --- Engine Setup ---
+STOCKFISH_PATH = os.path.join(os.path.dirname(__file__), "engine/stockfish")
 try:
-    engine_path = os.path.join(os.path.dirname(__file__), "engine", "stockfish")
-    engine = Engine(path=engine_path, depth=15)
+    engine = Stockfish(path=STOCKFISH_PATH, depth=15)
+    if not engine.is_stockfish_running():
+        raise Exception("Stockfish engine not running")
     print("--- Stockfish engine initialized successfully ---")
 except Exception as e:
-    print(f"--- FATAL ERROR: Could not initialize Stockfish engine: {e} ---")
+    print(f"--- FATAL ERROR: Could not initialize Stockfish engine. Error: {e} ---")
     exit()
 
 # --- Global Game State ---
@@ -52,29 +52,30 @@ class GameLog(db.Model):
     moves_json = db.Column(db.Text, nullable=False)
     played_at = db.Column(db.DateTime, default=datetime.datetime.utcnow)
 
+# --- Create tables ---
 with app.app_context():
     db.create_all()
-    print("--- Database tables checked/created successfully ---")
+    print("--- Database tables ready ---")
 
-# --- Helper Function for AI ---
+# --- Helper Function ---
 def get_ranked_moves(board_state):
-    engine.setfen(board_state.fen())
-    top_moves = engine.get_top_moves(count=len(list(board_state.legal_moves)))
-    if not top_moves:
+    engine.set_fen_position(board_state.fen())
+    moves = engine.get_top_moves(count=len(list(board_state.legal_moves)))
+    if not moves:
         return []
-    return [move['Move'] for move in top_moves]
+    return [move['Move'] for move in moves]
 
-# --- User Account Routes ---
+# --- User Routes ---
 @app.route('/register', methods=['GET', 'POST'])
 def register():
     if request.method == 'POST':
         username = request.form.get('username')
         password = request.form.get('password')
         if not username or not password:
-            flash('Username and password are required.')
+            flash('Username and password required.')
             return redirect(url_for('register'))
         if User.query.filter_by(username=username).first():
-            flash('Username is already taken.')
+            flash('Username taken.')
             return redirect(url_for('register'))
         new_user = User(username=username)
         new_user.set_password(password)
@@ -103,7 +104,7 @@ def login():
 def logout():
     session.pop('user_id', None)
     session.pop('username', None)
-    flash('You have been logged out.')
+    flash('Logged out.')
     return redirect(url_for('login'))
 
 # --- Main Game Routes ---
@@ -141,18 +142,18 @@ def handle_move():
             save_game_log()
             return jsonify({'status': 'Game Over', 'result': board.result()})
 
-        engine.setfen(board.fen())
+        engine.set_fen_position(board.fen())
         ai_move_uci = engine.get_best_move()
         if ai_move_uci:
             board.push(chess.Move.from_uci(ai_move_uci))
-
         if board.is_game_over():
             save_game_log()
+
         return jsonify({'status': 'Success', 'ai_move': ai_move_uci})
 
     return jsonify({'status': 'Error', 'message': 'Illegal move'}), 400
 
-# --- Game Log Saving ---
+# --- Game Log Function ---
 def save_game_log():
     if 'username' not in session:
         return
@@ -162,7 +163,7 @@ def save_game_log():
     new_log = GameLog(username=username, result=result, moves_json=moves_as_json_string)
     db.session.add(new_log)
     db.session.commit()
-    print(f"Game log saved for user '{username}'")
+    print(f"Game log saved for '{username}'.")
 
 # --- Run App ---
 if __name__ == '__main__':
