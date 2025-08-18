@@ -1,4 +1,4 @@
-# app.py (Final, Definitive Version with Correct Table Creation)
+# app.py (Final, Definitive Version with Correct Password Column Size)
 
 import os
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for, flash
@@ -27,7 +27,10 @@ player_move_history = []
 class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(80), unique=True, nullable=False)
-    password_hash = db.Column(db.String(128), nullable=False)
+    # --- THIS IS THE FIX ---
+    # The password hash is longer than 128 chars, so we make the column wider.
+    password_hash = db.Column(db.String(256), nullable=False)
+    # --- END OF FIX ---
     def set_password(self, password): self.password_hash = generate_password_hash(password)
     def check_password(self, password): return check_password_hash(self.password_hash, password)
 
@@ -38,13 +41,10 @@ class GameLog(db.Model):
     moves_json = db.Column(db.Text, nullable=False)
     played_at = db.Column(db.DateTime, default=datetime.datetime.utcnow)
 
-# --- THIS IS THE CRITICAL FIX ---
 # Create the database tables if they don't already exist.
-# This runs once when the app starts.
 with app.app_context():
     db.create_all()
     print("--- Database tables checked/created successfully. ---")
-# --- END OF CRITICAL FIX ---
 
 
 # --- AI BRAIN (Unchanged) ---
