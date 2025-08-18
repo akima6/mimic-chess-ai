@@ -1,11 +1,11 @@
-# app.py (Final Version - Using Lichess API for Guaranteed Reliability)
+# app.py (Final, Definitive Version with Correct Table Creation)
 
 import os
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for, flash
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import generate_password_hash, check_password_hash
 import chess
-import requests # The library for making web requests
+import requests
 import json
 import datetime
 
@@ -21,10 +21,9 @@ print("--- Application starting up. AI moves will be provided by Lichess API. --
 
 # --- Global Game State ---
 board = chess.Board()
-# This list will hold the detailed move dictionaries for logging
 player_move_history = []
 
-# --- Database Models (Unchanged) ---
+# --- Database Models ---
 class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(80), unique=True, nullable=False)
@@ -39,12 +38,22 @@ class GameLog(db.Model):
     moves_json = db.Column(db.Text, nullable=False)
     played_at = db.Column(db.DateTime, default=datetime.datetime.utcnow)
 
-# --- NEW AI BRAIN: A FUNCTION TO CALL THE LICHESS API ---
+# --- THIS IS THE CRITICAL FIX ---
+# Create the database tables if they don't already exist.
+# This runs once when the app starts.
+with app.app_context():
+    db.create_all()
+    print("--- Database tables checked/created successfully. ---")
+# --- END OF CRITICAL FIX ---
+
+
+# --- AI BRAIN (Unchanged) ---
 def get_ai_best_move_from_api(fen):
+    # ... (code is unchanged)
     api_url = "https://lichess.org/api/cloud-eval"
     params = {"fen": fen}
     try:
-        res = requests.get(api_url, params=params, timeout=5) # 5 second timeout
+        res = requests.get(api_url, params=params, timeout=5)
         res.raise_for_status()
         data = res.json()
         if data and 'pvs' in data and len(data['pvs']) > 0:
@@ -53,8 +62,7 @@ def get_ai_best_move_from_api(fen):
             return best_move_uci
     except requests.exceptions.RequestException as e:
         print(f"!!! API REQUEST FAILED: {e} !!!")
-    
-    print("!!! API failed or returned no move. Falling back to a random legal move. !!!")
+    print("!!! API failed. Falling back to a random legal move. !!!")
     legal_moves = list(board.legal_moves)
     if legal_moves:
         return legal_moves[0].uci()
@@ -105,7 +113,7 @@ def logout():
     flash('You have been logged out.')
     return redirect(url_for('login'))
 
-# --- Main Game Routes ---
+# --- Main Game Routes (Unchanged) ---
 @app.route('/')
 def home():
     if 'user_id' not in session:
@@ -120,7 +128,6 @@ def handle_move():
     player_move_uci = request.json.get('move')
     move_object = chess.Move.from_uci(player_move_uci)
     if move_object in board.legal_moves:
-        # We still log the player's move for our future mimicking AI
         move_data = { "turn": board.fullmove_number, "move_san": board.san(move_object) }
         player_move_history.append(move_data)
         board.push(move_object)
@@ -147,7 +154,6 @@ def save_game_log():
     db.session.commit()
     print(f"Game log saved to database for user '{username}'")
 
+# This part is only for running the app locally
 if __name__ == '__main__':
-    with app.app_context():
-        db.create_all()
     app.run(debug=True)
